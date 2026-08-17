@@ -27,7 +27,10 @@ concurrency:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
+    # macOS because that is where the formula is actually used, and because the
+    # gate below installs it for real. Public repositories get macOS runners at
+    # no cost, so there is no reason to validate somewhere users are not.
+    runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
       UPSTREAM: ssmule/copilot-sessions
@@ -63,14 +66,33 @@ jobs:
           current='${{ steps.check.outputs.current }}'
           url="https://github.com/${UPSTREAM}/archive/refs/tags/${latest}.tar.gz"
           curl -fsSL "$url" -o /tmp/src.tar.gz
-          sha=$(sha256sum /tmp/src.tar.gz | cut -d' ' -f1)
-          sed -i "s|archive/refs/tags/${current}\.tar\.gz|archive/refs/tags/${latest}.tar.gz|" "$FORMULA"
-          sed -i "s|^  sha256 \".*\"|  sha256 \"${sha}\"|" "$FORMULA"
+          sha=$(shasum -a 256 /tmp/src.tar.gz | cut -d' ' -f1)
+          sed -i '' "s|archive/refs/tags/${current}\.tar\.gz|archive/refs/tags/${latest}.tar.gz|" "$FORMULA"
+          sed -i '' "s|^  sha256 \".*\"|  sha256 \"${sha}\"|" "$FORMULA"
           # Prove the edit landed, rather than trusting sed's exit code: sed
           # reports success when it matches nothing at all.
           grep -q "archive/refs/tags/${latest}.tar.gz" "$FORMULA"
           grep -q "sha256 \"${sha}\"" "$FORMULA"
           git diff -- "$FORMULA"
+
+      - name: Check the formula is still well formed
+        run: brew style "$FORMULA"
+
+      - name: Install it for real before committing it
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          # A correct checksum only proves the tarball is the one named. It says
+          # nothing about whether the thing still installs and runs, which is
+          # what an unattended commit would otherwise publish untested.
+          #
+          # Homebrew will not install a formula given as a loose file path, so
+          # the edited formula is dropped into a real tap and installed the way
+          # a user would install it.
+          brew tap ssmule/tap
+          cp -f "$FORMULA" "$(brew --repository ssmule/tap)/Formula/"
+          brew install --build-from-source ssmule/tap/copilot-sessions
+          brew test ssmule/tap/copilot-sessions
 
       - name: Commit
         if: steps.check.outputs.changed == 'true' && inputs.dry_run != true
