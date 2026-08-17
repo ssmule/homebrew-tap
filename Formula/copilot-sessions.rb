@@ -4,7 +4,7 @@ class CopilotSessions < Formula
   desc "Terminal browser for your GitHub Copilot CLI sessions"
   homepage "https://github.com/ssmule/copilot-sessions"
   url "https://github.com/ssmule/copilot-sessions/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "2f4839b3da3d69b7bc3cb36cbdd91d14b2f3895c071da1049965f6456ae07a64"
+  sha256 "9def8940576be2b718757da646d4b5349417b0473c0e07eece8ad110f13074dc"
   license "MIT"
 
   depends_on "python@3.13"
