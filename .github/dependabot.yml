@@ -1,0 +1,11 @@
+# The bump workflow pins actions/checkout to a commit SHA, which is the right
+# thing to do and also means the pin never moves on its own. Without this file
+# that pin quietly rots: no alerts, no updates, forever.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
