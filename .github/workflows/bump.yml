@@ -1,0 +1,85 @@
+name: bump
+
+# Keeps Formula/copilot-sessions.rb in step with the upstream releases of
+# ssmule/copilot-sessions. Without this the formula silently pins 1.0.0 forever
+# and every `brew install` hands out a stale build.
+#
+# The checksum is computed from the tarball this job has just downloaded, so the
+# formula can never be committed with a sha256 that disagrees with the file its
+# url points at — the failure mode that makes a tap unusable.
+
+on:
+  schedule:
+    - cron: "17 7 * * *" # daily, off the hour so it is not fighting for runners
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would change, commit nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: ssmule/copilot-sessions
+      FORMULA: Formula/copilot-sessions.rb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Work out whether there is anything to do
+        id: check
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/${UPSTREAM}/releases/latest" --jq .tag_name)
+          current=$(sed -n 's|.*archive/refs/tags/\(v[^/]*\)\.tar\.gz.*|\1|p' "$FORMULA")
+          if [ -z "$latest" ] || [ -z "$current" ]; then
+            echo "could not read latest=[$latest] or current=[$current]" >&2
+            exit 1
+          fi
+          echo "latest=$latest"   >> "$GITHUB_OUTPUT"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          if [ "$latest" = "$current" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Formula is already on $current."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "$current -> $latest"
+          fi
+
+      - name: Rewrite the url and checksum
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          latest='${{ steps.check.outputs.latest }}'
+          current='${{ steps.check.outputs.current }}'
+          url="https://github.com/${UPSTREAM}/archive/refs/tags/${latest}.tar.gz"
+          curl -fsSL "$url" -o /tmp/src.tar.gz
+          sha=$(sha256sum /tmp/src.tar.gz | cut -d' ' -f1)
+          sed -i "s|archive/refs/tags/${current}\.tar\.gz|archive/refs/tags/${latest}.tar.gz|" "$FORMULA"
+          sed -i "s|^  sha256 \".*\"|  sha256 \"${sha}\"|" "$FORMULA"
+          # Prove the edit landed, rather than trusting sed's exit code: sed
+          # reports success when it matches nothing at all.
+          grep -q "archive/refs/tags/${latest}.tar.gz" "$FORMULA"
+          grep -q "sha256 \"${sha}\"" "$FORMULA"
+          git diff -- "$FORMULA"
+
+      - name: Commit
+        if: steps.check.outputs.changed == 'true' && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FORMULA"
+          git commit -m "copilot-sessions ${{ steps.check.outputs.latest }}
+
+          Checksum computed from the release tarball downloaded in this run."
+          git push
